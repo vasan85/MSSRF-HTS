@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep *)",
+      "Bash(wsl -d Ubuntu-20.04 -- bash -c \"ps aux 2>/dev/null | grep node | grep -v grep | head -5\")",
+      "Bash(wsl -d Ubuntu-20.04 -- bash -c \"cd /var/www/html/mssrf-HTS/backend && nohup node server.js > /tmp/backend.log 2>&1 & sleep 3 && cat /tmp/backend.log\")",
+      "Bash(wsl -d Ubuntu-20.04 -- bash -c \"curl -s 'http://localhost:3000/api/reports/wash-kpi'\")",
+      "Bash(wsl -d Ubuntu-20.04 -- bash -c \"curl -sv 'http://localhost:3000/api/reports/wash-kpi' 2>&1 | head -20\")",
+      "Bash(wsl -d Ubuntu-20.04 -- bash -c \"cat /tmp/backend.log\")",
+      "Bash(wsl -d Ubuntu-20.04 -- bash -c \"ss -tlnp | grep 3000\")",
+      "Bash(wsl -d Ubuntu-20.04 -- bash -c \"ps aux 2>/dev/null | grep 'server.js' | grep -v grep\")",
+      "Bash(Start-Sleep -Seconds 4)",
+      "Bash(Get-Content \"C:\\\\Users\\\\vasan\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\--wsl-localhost-Ubuntu-20-04-var-www-html-mssrf-HTS\\\\de63547c-7ce9-409c-ae68-f33e89a235f9\\\\tasks\\\\bujw7pora.output\" -ErrorAction SilentlyContinue)"
+    ]
+  }
+}

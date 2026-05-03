@@ -1777,6 +1777,70 @@
         </button>
       </div>
     </div>
+
+    <!-- Revision History Panel (edit mode only) -->
+    <div class="card rv-card" v-if="isEdit">
+      <div class="rv-header" @click="showHistory = !showHistory" style="cursor:pointer">
+        <div class="rv-title">🕓 Revision History</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="tag" style="background:var(--grey-100);color:var(--grey-600);font-size:11px">{{ history.length }} revision{{ history.length !== 1 ? 's' : '' }}</span>
+          <span style="font-size:12px;color:var(--grey-500)">{{ showHistory ? '▲ Hide' : '▼ Show' }}</span>
+        </div>
+      </div>
+
+      <div v-if="showHistory">
+        <div class="rv-loading" v-if="historyLoading"><div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto"></div></div>
+        <div class="rv-empty" v-else-if="!history.length">No revision history found for this record.</div>
+        <div class="rv-timeline" v-else>
+          <div class="rv-item" v-for="(rev, i) in history" :key="rev.id">
+            <div class="rv-dot" :class="'rv-dot-' + rev.action.toLowerCase()"></div>
+            <div class="rv-content">
+              <div class="rv-meta">
+                <span class="rv-action-badge" :class="'rv-badge-' + rev.action.toLowerCase()">
+                  {{ { CREATED:'✨ Created', EDITED:'✏️ Edited', SUBMITTED:'📤 Submitted',
+                       APPROVED:'✅ Approved', RETURNED:'↩ Returned', RESUBMITTED:'🔄 Resubmitted' }[rev.action] || rev.action }}
+                </span>
+                <span class="rv-who">{{ rev.changed_by_name }}</span>
+                <span class="rv-role-tag">{{ rev.user_role }}</span>
+                <span class="rv-time">{{ formatRevTime(rev.created_at) }}</span>
+              </div>
+              <div class="rv-comment" v-if="rev.comment">{{ rev.comment }}</div>
+              <div class="rv-actions" v-if="rev.has_snapshot && canRevert && i > 0">
+                <button class="btn btn-sm rv-revert-btn" @click="confirmRevert(rev)" :disabled="reverting">
+                  ↩ Revert to this version
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Revert Confirmation Modal -->
+    <div class="modal-overlay" v-if="revertModal.show" @click.self="revertModal.show=false">
+      <div class="modal-box" style="max-width:420px">
+        <div class="modal-header">
+          <div class="modal-title">↩ Confirm Revert</div>
+          <span class="modal-close" @click="revertModal.show=false">✕</span>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px;color:var(--grey-700);line-height:1.6">
+            You are about to revert this household record to the state it was in at:<br/>
+            <strong>{{ revertModal.time }}</strong> (edited by {{ revertModal.who }}).
+          </p>
+          <p style="font-size:13px;color:var(--red);margin-top:10px">
+            ⚠️ The current data will be saved as a new revision entry before reverting, so it can be recovered.
+          </p>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end">
+          <button class="btn btn-outline" @click="revertModal.show=false">Cancel</button>
+          <button class="btn btn-primary" style="background:var(--red);border-color:var(--red)" :disabled="reverting" @click="doRevert">
+            <span v-if="reverting" class="spinner" style="width:12px;height:12px;border-width:2px"></span>
+            <span v-else>↩ Confirm Revert</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1793,6 +1857,50 @@ const route  = useRoute()
 const router = useRouter()
 const isEdit = computed(() => !!route.params.id)
 const auth   = useAuthStore()
+
+// Revision history
+const history       = ref([])
+const historyLoading = ref(false)
+const showHistory   = ref(false)
+const reverting     = ref(false)
+const revertModal   = ref({ show: false, revisionId: null, time: '', who: '' })
+const canRevert     = computed(() => auth.role === 'admin' || auth.role === 'mis_head')
+
+function formatRevTime(ts) {
+  const d = new Date(ts)
+  return d.toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+}
+
+async function loadHistory() {
+  if (!isEdit.value) return
+  historyLoading.value = true
+  try {
+    const res = await api.get(`/workflow/${route.params.id}/history`)
+    history.value = res.data
+  } catch (e) {
+    console.error('history load error', e)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function confirmRevert(rev) {
+  revertModal.value = { show: true, revisionId: rev.id, time: formatRevTime(rev.created_at), who: rev.changed_by_name }
+}
+
+async function doRevert() {
+  reverting.value = true
+  try {
+    await api.post(`/workflow/${route.params.id}/revert/${revertModal.value.revisionId}`)
+    revertModal.value.show = false
+    // Reload the page to show reverted data
+    router.go(0)
+  } catch (e) {
+    alert(e.response?.data?.message || 'Revert failed')
+  } finally {
+    reverting.value = false
+  }
+}
 
 // GPS state
 const gpsLoading = ref(false)
@@ -2934,6 +3042,9 @@ onMounted(async () => {
   if (!isEdit.value && !auth.isMISHead) {
     showConsentModal.value = true
   }
+
+  // Load revision history for edit mode
+  if (isEdit.value) loadHistory()
 })
 </script>
 
@@ -3685,4 +3796,64 @@ textarea.form-input { resize: vertical; font-family: inherit; }
     min-height: 44px;
   }
 }
+
+/* ── Revision History ─────────────────────────────── */
+.rv-card { margin-top: 20px; padding: 0; overflow: hidden; }
+.rv-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; background: var(--grey-50); border-bottom: 1px solid var(--grey-200);
+  user-select: none;
+}
+.rv-title { font-size: 14px; font-weight: 700; color: var(--grey-800); }
+.rv-loading { padding: 20px; text-align: center; }
+.rv-empty   { padding: 20px; font-size: 13px; color: var(--grey-500); text-align: center; }
+
+.rv-timeline { padding: 16px 20px; display: flex; flex-direction: column; gap: 0; }
+.rv-item {
+  display: flex; gap: 14px; position: relative;
+  padding-bottom: 20px;
+}
+.rv-item:last-child { padding-bottom: 0; }
+.rv-item::before {
+  content: ''; position: absolute; left: 8px; top: 18px;
+  width: 2px; bottom: 0; background: var(--grey-200);
+}
+.rv-item:last-child::before { display: none; }
+
+.rv-dot {
+  width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+  margin-top: 1px; border: 2px solid #fff; box-shadow: 0 0 0 2px var(--grey-300);
+  z-index: 1;
+}
+.rv-dot-created     { background: var(--green); box-shadow: 0 0 0 2px var(--green-light); }
+.rv-dot-edited      { background: #1976d2;       box-shadow: 0 0 0 2px #90caf9; }
+.rv-dot-submitted   { background: #0288d1;       box-shadow: 0 0 0 2px #81d4fa; }
+.rv-dot-approved    { background: var(--green);  box-shadow: 0 0 0 2px var(--green-light); }
+.rv-dot-returned    { background: #e65100;       box-shadow: 0 0 0 2px #ffcc80; }
+.rv-dot-resubmitted { background: #6a1b9a;       box-shadow: 0 0 0 2px #ce93d8; }
+
+.rv-content { flex: 1; }
+.rv-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rv-action-badge {
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px;
+}
+.rv-badge-created     { background: #e8f5e9; color: #1b5e20; }
+.rv-badge-edited      { background: #e3f2fd; color: #0d47a1; }
+.rv-badge-submitted   { background: #e1f5fe; color: #01579b; }
+.rv-badge-approved    { background: #e8f5e9; color: #1b5e20; }
+.rv-badge-returned    { background: #fff3e0; color: #e65100; }
+.rv-badge-resubmitted { background: #f3e5f5; color: #6a1b9a; }
+
+.rv-who      { font-size: 12px; font-weight: 600; color: var(--grey-800); }
+.rv-role-tag { font-size: 11px; color: var(--grey-500); background: var(--grey-100); padding: 1px 6px; border-radius: 8px; }
+.rv-time     { font-size: 11px; color: var(--grey-400); margin-left: auto; }
+.rv-comment  { font-size: 12px; color: var(--grey-600); margin-top: 4px; font-style: italic; }
+.rv-actions  { margin-top: 6px; }
+.rv-revert-btn {
+  font-size: 11px; padding: 4px 12px; border: 1.5px solid var(--red);
+  color: var(--red); background: transparent; border-radius: 16px;
+  cursor: pointer; transition: all .15s;
+}
+.rv-revert-btn:hover:not(:disabled) { background: var(--red); color: #fff; }
+.rv-revert-btn:disabled { opacity: .45; cursor: not-allowed; }
 </style>

@@ -139,14 +139,18 @@ npm run dev
 
 ## Login Accounts
 
-All accounts use password: **`password`**
+All demo accounts use password: **`password`**
 
-| Role             | Email                   | Access |
-|------------------|-------------------------|--------|
-| Admin            | admin@mssrf.org         | Full system access |
-| Project Manager  | pm@mssrf.org            | Assigned projects only |
-| Field Enumerator | enumerator@mssrf.org    | Household entry + linking |
-| M&E Team         | me@mssrf.org            | Reports, exports, GIS |
+| Role         | Name              | Email                    | Password   | Access Level |
+|--------------|-------------------|--------------------------|------------|--------------|
+| Admin        | Admin User        | admin@mssrf.org          | `password` | Full system access — users, settings, audit, anonymisation |
+| MIS Head     | MIS Head          | mishead@mssrf.org        | `password` | View all data, manage consent & privacy dashboard |
+| MIS Reviewer | MIS Reviewer      | reviewer@mssrf.org       | `password` | Review & approve/return submitted household records |
+| Enumerator   | Field Enumerator  | enumerator@mssrf.org     | `password` | Add & submit household surveys (own records only) |
+| M&E Team     | ME Team Member    | me@mssrf.org             | `password` | Reports, exports, dashboards, GIS maps |
+
+> **Security note:** Change all passwords before deploying to production.  
+> Admin can update passwords via Settings → User Management or the Change Password option in the top-right profile menu.
 
 ---
 

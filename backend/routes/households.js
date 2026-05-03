@@ -385,10 +385,16 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     const [check] = await conn.query(
-      'SELECT created_by_user_id, workflow_status FROM household_master WHERE household_id = ?',
+      'SELECT * FROM household_master WHERE household_id = ?',
       [req.params.id]
     );
     if (!check.length) { await conn.rollback(); conn.release(); return res.status(404).json({ message: 'Household not found' }); }
+
+    // Capture full snapshot before overwriting (for revert)
+    const hhSnapshot = check[0];
+    const [memberSnap] = await conn.query(
+      'SELECT * FROM household_members WHERE household_id = ?', [req.params.id]
+    );
 
     if (req.user.role === 'enumerator') {
       if (check[0].created_by_user_id !== req.user.id) {
@@ -520,14 +526,15 @@ router.put('/:id', auth, async (req, res) => {
     );
 
     await conn.query(
-      `INSERT INTO revision_log (household_id, changed_by_user_id, changed_by_name, user_role, action)
-       VALUES (?, ?, ?, ?, 'EDITED')`,
-      [req.params.id, req.user.id, req.user.name, req.user.role]
+      `INSERT INTO revision_log (household_id, changed_by_user_id, changed_by_name, user_role, action, snapshot, members_snapshot)
+       VALUES (?, ?, ?, ?, 'EDITED', ?, ?)`,
+      [req.params.id, req.user.id, req.user.name, req.user.role,
+       JSON.stringify(hhSnapshot), JSON.stringify(memberSnap)]
     );
 
     await conn.commit();
     conn.release();
-    
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);

@@ -112,13 +112,87 @@ router.get('/my-queue', auth, roles('enumerator'), async (req, res) => {
 router.get('/:id/history', auth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT id, changed_by_name, user_role, action, comment, created_at
+      `SELECT id, changed_by_name, user_role, action, comment, created_at,
+              CASE WHEN snapshot IS NOT NULL THEN true ELSE false END AS has_snapshot
        FROM revision_log WHERE household_id = ? ORDER BY created_at DESC`,
       [req.params.id]
     );
     res.json(rows);
   } catch (err) {
     console.error('history error:', err.message);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+/* ── Revert to a specific revision (admin / mis_head only) ───── */
+router.post('/:id/revert/:revisionId', auth, roles('admin', 'mis_head'), async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // Load the target revision snapshot
+    const [revRows] = await conn.query(
+      `SELECT snapshot, members_snapshot FROM revision_log WHERE id = ? AND household_id = ?`,
+      [req.params.revisionId, req.params.id]
+    );
+    if (!revRows.length || !revRows[0].snapshot) {
+      await conn.rollback(); conn.release();
+      return res.status(404).json({ message: 'Revision not found or has no snapshot data' });
+    }
+
+    const snap = typeof revRows[0].snapshot === 'string'
+      ? JSON.parse(revRows[0].snapshot) : revRows[0].snapshot;
+    const membersSnap = revRows[0].members_snapshot
+      ? (typeof revRows[0].members_snapshot === 'string'
+          ? JSON.parse(revRows[0].members_snapshot) : revRows[0].members_snapshot)
+      : [];
+
+    // Save current state as a snapshot before reverting
+    const [currentHH] = await conn.query('SELECT * FROM household_master WHERE household_id = ?', [req.params.id]);
+    const [currentMembers] = await conn.query('SELECT * FROM household_members WHERE household_id = ?', [req.params.id]);
+
+    // Restore household_master from snapshot (exclude auto fields)
+    const { household_id, created_at, updated_at, ...fields } = snap;
+    const setClauses = Object.keys(fields).map(k => `\`${k}\` = ?`).join(', ');
+    const setValues  = Object.values(fields);
+    await conn.query(
+      `UPDATE household_master SET ${setClauses} WHERE household_id = ?`,
+      [...setValues, req.params.id]
+    );
+
+    // Restore members from snapshot
+    await conn.query('DELETE FROM household_members WHERE household_id = ?', [req.params.id]);
+    for (const m of membersSnap) {
+      const { id: _id, household_id: _hid, ...mFields } = m;
+      const mCols   = Object.keys(mFields).join(', ');
+      const mPlaces = Object.keys(mFields).map(() => '?').join(', ');
+      await conn.query(
+        `INSERT INTO household_members (household_id, ${mCols}) VALUES (?, ${mPlaces})`,
+        [req.params.id, ...Object.values(mFields)]
+      );
+    }
+
+    // Log the revert action with snapshot of the pre-revert state
+    await conn.query(
+      `INSERT INTO revision_log (household_id, changed_by_user_id, changed_by_name, user_role, action, comment, snapshot, members_snapshot)
+       VALUES (?, ?, ?, ?, 'EDITED', ?, ?, ?)`,
+      [req.params.id, req.user.id, req.user.name, req.user.role,
+       `Reverted to revision #${req.params.revisionId}`,
+       JSON.stringify(currentHH[0]), JSON.stringify(currentMembers)]
+    );
+
+    await conn.query(
+      'INSERT INTO audit_log (user_id,user_name,role,module,action,record_id,detail) VALUES (?,?,?,?,?,?,?)',
+      [req.user.id, req.user.name, req.user.role, 'Household', 'REVERT',
+       req.params.id, `Reverted to revision #${req.params.revisionId}`]
+    );
+
+    await conn.commit();
+    conn.release();
+    res.json({ success: true, message: `Household reverted to revision #${req.params.revisionId}` });
+  } catch (err) {
+    console.error('revert error:', err);
+    if (conn) { await conn.rollback(); conn.release(); }
     res.status(500).json({ message: 'Internal server error' });
   }
 });
